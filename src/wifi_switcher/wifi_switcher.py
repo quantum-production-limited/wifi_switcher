@@ -20,6 +20,11 @@ class NetworkConnector:
         logger.info(f'Attempting to connect to network with SSID {ssid}')
         try:
             nmcli.device.wifi_connect(ssid, password)
+        except nmcli._exception.ConnectionActivateFailedException:
+            logger.warning(f'Failed to connect, likely due to invalid or missing password')
+            self.successful = False
+            self.message = f'Failed to connect, likely due to invalid or missing password'
+            return
         except nmcli._exception.NotExistException:
             logger.info(f'Connection not found, rescanning to see if it can be found:')
             try:
@@ -34,6 +39,11 @@ class NetworkConnector:
             logger.info(f'Scan complete, attempting to connect again...')
             try:
                 nmcli.device.wifi_connect(ssid, password)
+            except nmcli._exception.ConnectionActivateFailedException:
+                logger.warning(f'Failed to connect, likely due to incorrect or missing password')
+                self.successful = False
+                self.message = f'Failed to connect, likely due to incorrect or missing password'
+                return
             except nmcli._exception.NotExistException:
                 logger.warning(f'Connection still not found after rescanning, check the SSID is correct')
                 self.successful = False
