@@ -43,7 +43,7 @@ logger = logging.getLogger()
 logging.basicConfig(level=logging.INFO)
 
 # All-in-one function to connect to a network
-connect_to_network('ssid', 'password', 'full_path_to_netplan_yaml_file')
+connect_to_network('ssid', 'password', '/full/path_to/netplan_yaml_file.yaml')
 
 # Alternatively, just update the netplan yaml file:
 from wifi_switcher.wifi_switcher import update_netplan_settings
