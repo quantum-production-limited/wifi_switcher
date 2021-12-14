@@ -1,104 +1,131 @@
-import nmcli
+import yaml
+import os
+import subprocess
 import logging
+
+from .exceptions import ExitStatusException
 
 logger = logging.getLogger()
 
 
-class NetworkConnector:
-    def __init__(self):
-        self.successful = None
-        self.message = None
+class NetplanYamlUpdater:
+    _default_wlan0 = {
+        'access-points': {},
+        'dhcp4': True
+    }
 
-    def _connection_attempt(self, ssid, password):
-        """Connect to a WiFi network with the provided SSID and Password.
+    def __init__(self, path_to_netplan_file):
+        self.path_to_netplan_file = path_to_netplan_file
+        self.netplan_settings = None
+        self._load_netplan_settings()
 
-        Attempts to connect to a WiFi network using NMCLI. If the network is not found, a scan will be performed to try to
-        find it and then attempt to connect again.
+    def _load_netplan_settings(self):
+        """Opens the YAML file at self.path_to_netplan_file and parses it using PyYAML.
+
+        If the file is not found, instead returns an empty dict. If the file is found but is parsed into an object other
+        than a dict, a TypeError is raised.
+
+        self.netplan_settings will be set to the returned dict.
+
+        :return: The loaded yaml file, if it is found. Otherwise, an empty dict.
+        :rtype: dict
+        :raises: TypeError
         """
-        nmcli.disable_use_sudo()
-
-        logger.info(f'Attempting to connect to network with SSID {ssid}')
         try:
-            nmcli.device.wifi_connect(ssid, password)
-        except nmcli._exception.ConnectionActivateFailedException:
-            logger.warning(f'Failed to connect, likely due to invalid or missing password')
-            self.successful = False
-            self.message = f'Failed to connect, likely due to invalid or missing password'
-            return
-        except nmcli._exception.NotExistException:
-            logger.info(f'Connection not found, rescanning to see if it can be found:')
-            try:
-                nmcli.device.wifi_rescan(ssid=ssid)
-            except nmcli._exception.ScanningNotAllowedException:
-                logger.warning(f'Not allowed to scan immediately after another scan, please try again in 30 seconds.')
-                self.successful = False
-                self.message = f'Failed to scan for network with SSID: {ssid}. You are not allowed to scan' \
-                               f' immediately after a previous scan, please wait 30 seconds and try again.'
-                return
+            with open(self.path_to_netplan_file, 'r') as f:
+                data = f.read()
+                logger.debug(f'Opened existing netplan settings at {self.path_to_netplan_file}')
+        except FileNotFoundError:
+            data = None
+            logger.debug(f'No netplan settings found at {self.path_to_netplan_file}')
 
-            logger.info(f'Scan complete, attempting to connect again...')
-            try:
-                nmcli.device.wifi_connect(ssid, password)
-            except nmcli._exception.ConnectionActivateFailedException:
-                logger.warning(f'Failed to connect, likely due to incorrect or missing password')
-                self.successful = False
-                self.message = f'Failed to connect, likely due to incorrect or missing password'
-                return
-            except nmcli._exception.NotExistException:
-                logger.warning(f'Connection still not found after rescanning, check the SSID is correct')
-                self.successful = False
-                self.message = f'Unable to find a connection with SSID: {ssid}'
-                return
+        if data:
+            parsed_data = yaml.load(data, yaml.Loader)
+            logger.debug(f'Parsed netplan settings: {parsed_data}')
+            if isinstance(parsed_data, dict):
+                self.netplan_settings = parsed_data
+                logger.info(f'Successfully opened & parsed netplan settings at {self.path_to_netplan_file}')
+            else:
+                raise TypeError(f'The YAML file at {self.path_to_netplan_file} does not parse into a Python dictionary,'
+                                f' so it cannot be loaded. The file parsed as: {type(parsed_data)}')
 
-        # Sometimes nmcli doesn't report an error, but the network connection failed (e.g. if it times out). We can
-        # check this by looking at the connection details of the requested connection...
-        try:
-            # Try grabbing details with just the provided SSID
-            all_connection_details = nmcli.connection.show(ssid)
-        except nmcli._exception.NotExistException:
-            try:
-                # If it's not found, try prefixing with "Auto " - some Linux distros add this to the SSID when saving.
-                all_connection_details = nmcli.connection.show(f'Auto {ssid}')
-            except nmcli._exception.NotExistException:
-                logger.warning(f'SSID {ssid} does not seem to be associated with a connection, so cannot confirm the'
-                               f' connection status')
-                self.successful = False
-                self.message = f'Attempted to connect to SSID: {ssid}. Unable to confirm whether the connection ' \
-                               f'attempt succeeded as there is no saved connection for that SSID.'
-                return
-
-        # Once we've found the connection details, we get a Dict with a lot of information. If the connection is
-        # currently connected, it will have the key 'GENERAL.STATE' and value 'activated'..
-        if all_connection_details.get('GENERAL.STATE') == 'activated':
-            logger.info(f'Connected successfully to network with SSID {ssid}')
-            self.successful = True
-            self.message = f'Connected successfully to network with SSID {ssid}'
-            return
         else:
-            logger.warning(
-                f'Some unknown connection error while connecting to SSID {ssid}. This can happen if the network was'
-                f' cached from a previous scan or connection attempt. Wait 30 seconds and try again.')
-            self.successful = False
-            self.message = f'Unknown connection error while connecting to SSID {ssid}. Normally this means the ' \
-                           f'connection attempt timed out, try again in 30 seconds.'
-            return
+            self.netplan_settings = {}
+            logger.info(f'No existing netplan settings found at {self.path_to_netplan_file}, starting from blank'
+                        f' settings.')
 
-    def connect_to_network(self, ssid, password):
-        self._connection_attempt(ssid, password)
-        return self.successful, self.message
+        return self.netplan_settings
+
+    def _get_or_create_wlan0_settings(self):
+        """Gets the wlan0 settings from the netplan settings, or creates default settings if none exist.
+
+        Attempts to return self.netplan_settings['Network']['wifis']['wlan0']. If any of those keys don't exist,
+        they will be created and a default value for wlan0 will be created:
+        {'wlan0': 'access-points': {}, 'dhcp4': True}
+
+        :return: The wlan0 settings from self.netplan_settings
+        :rtype: dict
+        """
+        if self.netplan_settings is None:
+            self._load_netplan_settings()
+        return self.netplan_settings.setdefault(
+            'Network', {'version': 2}
+        ).setdefault(
+            'wifis', {}
+        ).setdefault(
+            'wlan0', self._default_wlan0
+        )
+
+    def set_wlan0_access_point(self, ssid, password):
+        """Replaces the current access point(s) under wlan0 with the provided ssid/password"""
+        access_points = self._get_or_create_wlan0_settings()['access-points']
+
+        for key in list(access_points.keys()):
+            access_points.pop(key)
+            logger.debug(f'Removed existing access point: {key}')
+
+        access_points[ssid] = {'password': password}
+        logger.info(f'Added access point to wlan0: {ssid}')
+
+        return access_points
+
+    def save(self):
+        """Dumps self.netplan_settings to a YAML file at the location in self.path_to_netplan_file"""
+        # Create the folder tree if it doesn't exist already
+        folder = os.path.dirname(self.path_to_netplan_file)
+        if folder:
+            os.makedirs(folder, exist_ok=True)
+            logger.debug(f'Folder did not exist, but was created: {folder}')
+
+        # Save the yaml file
+        with open(self.path_to_netplan_file, 'w') as f:
+            yaml.dump(self.netplan_settings, f)
+            logger.info(f'Saved new netplan settings to disk at {self.path_to_netplan_file}')
 
 
-def connect_to_network(ssid: str, password: str) -> tuple:
-    """Connect to a WiFi network with the provided SSID and Password
-    
-    Creates a NetworkConnector and attempts to connect using the provided details. If the network isn't found, it will
-    be scanned for and then another connection attempt is made.
+def update_netplan_settings(ssid, password, path_to_netplan_yaml):
+    netplan = NetplanYamlUpdater(path_to_netplan_yaml)
 
-    :param ssid: The SSID of the WiFi network you want to scan for and connect to.
-    :param password: The password for the WiFi network
-    :return: A 2-tuple. The first element is a Boolean showing whether the connection attempt succeeded, and the second
-        element is a success/error message that can be displayed to the user.
-    :rtype: tuple
-    """
-    connector = NetworkConnector()
-    return connector.connect_to_network(ssid, password)
+    netplan.set_wlan0_access_point(ssid, password)
+    netplan.save()
+
+
+def generate_and_apply_netplan_changes():
+    generate_command = ['netplan', 'generate']
+    generate_result = subprocess.run(generate_command, capture_output=True)
+    if generate_result.returncode != 0:
+        raise ExitStatusException(f'Non-zero exit status was generated from command {generate_command}.'
+                                  f' Exit status code: {generate_result.returncode}.\nError message:\n'
+                                  f'{generate_result.stderr.decode("utf-8")}')
+    else:
+        apply_command = ['netplan', 'apply']
+        apply_result = subprocess.run(apply_command, capture_output=True)
+        if apply_result.returncode != 0:
+            raise ExitStatusException(f'Non-zero exit status was generated from command {apply_command}.'
+                                      f' Exit status code: {apply_result.returncode}.\nError message:\n'
+                                      f'{apply_result.stderr.decode("utf-8")}')
+
+
+def connect_to_network(ssid, password, path_to_netplan_yaml):
+    update_netplan_settings(ssid, password, path_to_netplan_yaml)
+    generate_and_apply_netplan_changes()
