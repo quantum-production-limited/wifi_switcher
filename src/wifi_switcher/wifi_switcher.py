@@ -28,7 +28,7 @@ class NetworkConnector:
         except nmcli._exception.NotExistException:
             logger.info(f'Connection not found, rescanning to see if it can be found:')
             try:
-                nmcli.device.wifi_rescan(ssid='Wf_htc')
+                nmcli.device.wifi_rescan(ssid=ssid)
             except nmcli._exception.ScanningNotAllowedException:
                 logger.warning(f'Not allowed to scan immediately after another scan, please try again in 30 seconds.')
                 self.successful = False
