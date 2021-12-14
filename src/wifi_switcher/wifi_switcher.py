@@ -40,7 +40,7 @@ class NetplanYamlUpdater:
             logger.debug(f'No netplan settings found at {self.path_to_netplan_file}')
 
         if data:
-            parsed_data = yaml.load(data, yaml.Loader)
+            parsed_data = yaml.safe_load(data)
             logger.debug(f'Parsed netplan settings: {parsed_data}')
             if isinstance(parsed_data, dict):
                 self.netplan_settings = parsed_data
