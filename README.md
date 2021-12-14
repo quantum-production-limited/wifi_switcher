@@ -28,11 +28,11 @@ Network:
       dhcp4: true
 ```
 
-##Installation:
+## Installation:
 
 `pip install git+https://github.com/quantum-production-limited/wifi_switcher.git`
 
-##Usage:
+## Usage:
 
 ```python
 from wifi_switcher.wifi_switcher import connect_to_network
