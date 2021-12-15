@@ -9,16 +9,16 @@ connect_to_network(ssid, password, path_to_netplan_yaml)
 
 Executing this function will:
 - Look for a file at `path_to_netplan_yaml` and parse the YAML inside it.
-- Overwrite the `Network.wifis.wlan0.access-points` node with the `ssid` and `password`
+- Overwrite the `network.wifis.wlan0.access-points` node with the `ssid` and `password`
 provided. Any existing SSIDs and passwords will be replaced, not added to.
-- If the file doesn't contain the nested key `Network.wifis.wlan0`, then it will be
+- If the file doesn't contain the nested key `network.wifis.wlan0`, then it will be
 created and assigned the default values below (`dhcp4: true` and basic settings for the
 `ssid` and `password`)
 - If the file doesn't exist at all, then it will be created (as well as creating the full
 folder path), with the settings below.
 
 ```yaml
-Network:
+network:
   version: 2
   wifis:
     wlan0:

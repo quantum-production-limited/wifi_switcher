@@ -59,7 +59,7 @@ class NetplanYamlUpdater:
     def _get_or_create_wlan0_settings(self):
         """Gets the wlan0 settings from the netplan settings, or creates default settings if none exist.
 
-        Attempts to return self.netplan_settings['Network']['wifis']['wlan0']. If any of those keys don't exist,
+        Attempts to return self.netplan_settings['network']['wifis']['wlan0']. If any of those keys don't exist,
         they will be created and a default value for wlan0 will be created:
         {'wlan0': 'access-points': {}, 'dhcp4': True}
 
@@ -69,7 +69,7 @@ class NetplanYamlUpdater:
         if self.netplan_settings is None:
             self._load_netplan_settings()
         return self.netplan_settings.setdefault(
-            'Network', {'version': 2}
+            'network', {'version': 2}
         ).setdefault(
             'wifis', {}
         ).setdefault(
